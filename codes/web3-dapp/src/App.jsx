@@ -4,12 +4,13 @@ import {
   useAppKitProvider,
 } from "@reown/appkit/react";
 import { EthersAdapter } from "@reown/appkit-adapter-ethers";
-import { arbitrum, mainnet, sepolia } from "@reown/appkit/networks";
+import { mainnet, sepolia } from "@reown/appkit/networks";
 import { useEffect, useState } from "react";
 import oyklogo from "./assets/oyk-logo.png";
-import { tokenAbi, questionAnswerAbi } from "./assets/token_abi";
-import { ethers } from "ethers";
+import { tokenAbi, questionAnswerAbi } from "./assets/abis";
+import { ethers, formatUnits } from "ethers";
 import { BrowserProvider } from "ethers";
+import { format } from "date-fns";
 
 /* WALLET KIT AYARLARI (HER WALLET PAKETİNE GÖRE DEĞİŞİKLİK GÖSTEREBİLİR) */
 const projectId = "415b280d7f14fd394fac17ffed28e6db";
@@ -42,71 +43,24 @@ const App = () => {
   const [tokenContract, setTokenContract] = useState(null);
   const [questionAnswerContract, setQuestionAnswerContract] = useState(null);
 
+  // QUESTION, ANSWER
+  const [questionCount, setQuestionCount] = useState(0);
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState([]);
+  const [newQuestionContent, setNewQuestionContent] = useState("");
+  const [newAnswerContents, setNewAnswerContents] = useState({});
+
+  // LOADINGS
+  const [isQuestionsLoading, setIsQuestionsLoading] = useState(false);
+  const [isAnswersLoading, setIsAnswersLoading] = useState(false);
+  const [isUpvoteLoading, setIsUpvoteLoading] = useState({});
+  const [isSubmitQuestionLoading, setIsSubmitQuestionLoading] = useState(false);
+  const [isSubmitAnswerLoading, setIsSubmitAnswerLoading] = useState({});
+
   const OYK_TOKEN_ADDRESS = "0x3E4EF6dfc4565B92C4a4e60897079925E85A615E";
-  const QUESTION_ANSWER_ADDRESS = "0x3E4EF6dfc4565B92C4a4e60897079925E85A615E";
+  const QUESTION_ANSWER_ADDRESS = "0xCf1bCC08a9e2f7216Fc0717e16De67285D610C54";
 
-  const [questions] = useState([
-    {
-      id: 1,
-      author: "0x1234567890123456789012345678901234567890",
-      content: "Ethereum'da gas fee nasıl hesaplanır?",
-      timestamp: 1706712000,
-      answerIds: [1, 2, 3],
-    },
-    {
-      id: 2,
-      author: "0x2345678901234567890123456789012345678901",
-      content: "Smart contract deployment maliyeti nedir?",
-      timestamp: 1706798400,
-      answerIds: [4, 5, 6],
-    },
-  ]);
-
-  const [answers] = useState([
-    {
-      id: 1,
-      questionId: 1,
-      author: "0x3456789012345678901234567890123456789012",
-      content: "Gas fee = gas limit * gas price formülü ile hesaplanır.",
-      upvotes: 4,
-    },
-    {
-      id: 2,
-      questionId: 1,
-      author: "0x4567890123456789012345678901234567890123",
-      content: "Ağın yoğunluğuna göre değişir.",
-      upvotes: 2,
-    },
-    {
-      id: 3,
-      questionId: 1,
-      author: "0x5678901234567890123456789012345678901234",
-      content: "Base fee + priority fee şeklinde hesaplanır.",
-      upvotes: 0,
-    },
-    {
-      id: 4,
-      questionId: 2,
-      author: "0x6789012345678901234567890123456789012345",
-      content: "Kontratın büyüklüğüne göre değişir.",
-      upvotes: 4,
-    },
-    {
-      id: 5,
-      questionId: 2,
-      author: "0x7890123456789012345678901234567890123456",
-      content: "Optimization flags kullanarak maliyeti düşürebilirsiniz.",
-      upvotes: 2,
-    },
-    {
-      id: 6,
-      questionId: 2,
-      author: "0x8901234567890123456789012345678901234567",
-      content: "Test ağlarında ücretsizdir.",
-      upvotes: 0,
-    },
-  ]);
-
+  /* DEFINE PROVIDER */
   useEffect(() => {
     if (isConnected && walletProvider) {
       const newProvider = new BrowserProvider(walletProvider);
@@ -116,48 +70,50 @@ const App = () => {
     }
   }, [isConnected, walletProvider]);
 
+  /* INITIALIZE CONTRACTS */
   useEffect(() => {
-    const initContracts = async () => {
-      try {
-        if (!isConnected || !provider) {
-          setTokenContract(null);
-          setQuestionAnswerContract(null);
-          return;
-        }
-
-        const signer = await provider.getSigner();
-        const newTokenContract = new ethers.Contract(
-          OYK_TOKEN_ADDRESS,
-          tokenAbi,
-          signer
-        );
-        const newQuestionAnswerContract = new ethers.Contract(
-          QUESTION_ANSWER_ADDRESS,
-          tokenAbi,
-          signer
-        );
-
-        setTokenContract(newTokenContract);
-        setQuestionAnswerContract(newQuestionAnswerContract);
-      } catch (err) {
-        setTokenContract(null);
-        setQuestionAnswerContract(null);
-      } finally {
-      }
-    };
-
     initContracts();
   }, [address, tokenAbi, questionAnswerAbi, isConnected, provider]);
 
   useEffect(() => {
+    if (isConnected && walletProvider && questionAnswerContract) {
+      loadQuestions();
+    }
+  }, [isConnected, walletProvider, questionAnswerContract]);
+
+  /* INITIALIZE CONTRACTS */
+  const initContracts = async () => {
+    try {
+      if (!isConnected || !provider) {
+        setTokenContract(null);
+        setQuestionAnswerContract(null);
+        return;
+      }
+
+      const signer = await provider.getSigner();
+      const newTokenContract = new ethers.Contract(
+        OYK_TOKEN_ADDRESS,
+        tokenAbi,
+        signer
+      );
+      const newQuestionAnswerContract = new ethers.Contract(
+        QUESTION_ANSWER_ADDRESS,
+        questionAnswerAbi,
+        signer
+      );
+
+      setTokenContract(newTokenContract);
+      setQuestionAnswerContract(newQuestionAnswerContract);
+    } catch (err) {
+      setTokenContract(null);
+      setQuestionAnswerContract(null);
+    } finally {
+    }
+  };
+
+  useEffect(() => {
     if (isConnected && provider && tokenContract) {
       fetchBalances();
-
-      provider.on("block", () => fetchBalances());
-
-      return () => {
-        provider.removeListener("block", fetchBalances);
-      };
     }
   }, [isConnected, provider, tokenContract, address]);
 
@@ -177,12 +133,79 @@ const App = () => {
     }
   };
 
-  const formatAddress = (address) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  const loadQuestions = async () => {
+    setIsQuestionsLoading(true);
+    try {
+      const questions = await questionAnswerContract.getQuestions();
+      setQuestions(questions);
+      setIsAnswersLoading(true);
+      const allAnswers = [];
+      // her soru için ayrı ayrı cevapları yükle
+      for (const question of questions) {
+        const answers = await questionAnswerContract.getAnswersForQuestion(
+          question.id
+        );
+        allAnswers.push(...answers);
+      }
+      setAnswers(allAnswers);
+    } catch (err) {
+      console.error("Load questions error:", err);
+    } finally {
+      setIsQuestionsLoading(false);
+      setIsAnswersLoading(false);
+    }
   };
 
-  const formatDate = (timestamp) => {
-    return new Date(timestamp * 1000).toLocaleDateString();
+  const createQuestion = async () => {
+    setIsSubmitQuestionLoading(true);
+    try {
+      const tx = await questionAnswerContract.createQuestion(
+        newQuestionContent
+      );
+      await tx.wait();
+      setNewQuestionContent("");
+      loadQuestions();
+    } catch (err) {
+      console.error("Create question error:", err);
+    } finally {
+      setIsSubmitQuestionLoading(false);
+    }
+  };
+
+  const createAnswer = async (questionId) => {
+    setIsSubmitAnswerLoading((prev) => ({ ...prev, [questionId]: true }));
+    try {
+      const content = newAnswerContents[questionId];
+      const tx = await questionAnswerContract.createAnswer(questionId, content);
+      await tx.wait();
+      setNewAnswerContents((prev) => ({ ...prev, [questionId]: "" }));
+      loadQuestions();
+    } catch (err) {
+      console.error("Create answer error:", err);
+    } finally {
+      setIsSubmitAnswerLoading((prev) => ({ ...prev, [questionId]: false }));
+    }
+  };
+
+  const handleUpvoteAnswer = async (answerId) => {
+    setIsUpvoteLoading((prev) => ({ ...prev, [answerId]: true }));
+    try {
+      const approveTx = await tokenContract.approve(
+        QUESTION_ANSWER_ADDRESS,
+        ethers.parseEther("10")
+      );
+      await approveTx.wait();
+
+      const tx = await questionAnswerContract.upvoteAnswer(answerId);
+      await tx.wait();
+
+      loadQuestions();
+      fetchBalances();
+    } catch (err) {
+      console.error("Upvote error:", err);
+    } finally {
+      setIsUpvoteLoading((prev) => ({ ...prev, [answerId]: false }));
+    }
   };
 
   return (
@@ -215,81 +238,120 @@ const App = () => {
         {/* Question Input */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
           <textarea
-            className="w-full p-4 border-2 border-gray-100 rounded-xl mb-4 resize-none focus:outline-none focus:border-[#0F9AF4] focus:ring-2 focus:ring-[#0F9AF4] focus:ring-opacity-20 transition-all"
+            value={newQuestionContent}
+            onChange={(e) => setNewQuestionContent(e.target.value)}
+            className="w-full p-4 border-2 border-gray-100 rounded-xl mb-4"
             placeholder="Sorunuzu buraya yazın..."
             rows={3}
           />
           <div className="flex justify-end">
-            <button className="bg-[#0F9AF4] text-white px-8 py-3 rounded-xl hover:bg-[#0F9AF4]/90 transition-all font-medium shadow-lg shadow-[#0F9AF4]/20">
-              Soru Sor
+            <button
+              onClick={createQuestion}
+              className="bg-[#0F9AF4] text-white px-8 py-3 rounded-xl"
+            >
+              {isSubmitQuestionLoading ? (
+                <div className="animate-spin h-5 w-5 border-t-2 border-white rounded-full"></div>
+              ) : (
+                "Soru Sor"
+              )}
             </button>
           </div>
         </div>
 
-        {/* Questions List */}
-        <div className="space-y-8">
-          {questions.map((question) => (
-            <div
-              key={question.id}
-              className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow duration-300"
-            >
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="bg-[#0F9AF4]/10 px-4 py-1 rounded-full">
-                    <p className="text-sm text-[#0F9AF4] font-medium">
-                      {formatAddress(question.author)}
+        {isQuestionsLoading ? (
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#0F9AF4]"></div>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {questions.map((question) => (
+              <div
+                key={question.id}
+                className="bg-white rounded-xl shadow-lg p-6"
+              >
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="bg-[#0F9AF4]/10 px-4 py-1 rounded-full">
+                      <p className="text-xs text-[#0F9AF4] font-medium">
+                        {question.author}
+                      </p>
+                    </div>
+                    <span>•</span>
+                    <p className="text-sm text-gray-500">
+                    {format(Number(formatUnits(question.timestamp, 0)) * 1000, "dd MMM yyyy HH:mm")}
                     </p>
                   </div>
-                  <span className="text-gray-400">•</span>
-                  <p className="text-sm text-gray-500">
-                    {formatDate(question.timestamp)}
-                  </p>
+                  <h3 className="text-xl font-medium text-gray-800">
+                    {question.content}
+                  </h3>
                 </div>
-                <h3 className="text-xl font-medium text-gray-800">
-                  {question.content}
-                </h3>
-              </div>
 
-              {/* Answers */}
-              <div className="space-y-4 pl-6 border-l-2 border-[#0F9AF4]/20">
-                {answers
-                  .filter((answer) => answer.questionId === question.id)
-                  .map((answer) => (
-                    <div key={answer.id} className="bg-gray-50 rounded-lg p-4">
-                      <div className="flex justify-between items-start gap-4">
-                        <div className="flex-1">
-                          <div className="bg-[#0F9AF4]/10 px-3 py-1 rounded-full inline-block mb-2">
-                            <p className="text-sm text-[#0F9AF4] font-medium">
-                              {formatAddress(answer.author)}
-                            </p>
+                <div className="space-y-4 pl-6 border-l-2">
+                  {answers
+                    .filter((a) => a.questionId === question.id)
+                    .map((answer) => (
+                      <div
+                        key={answer.id}
+                        className="bg-gray-50 rounded-lg p-4"
+                      >
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1">
+                            <div className="bg-[#0F9AF4]/10 px-3 py-1 rounded-full inline-block mb-2">
+                              <p className="text-xs text-[#0F9AF4] font-medium">
+                                {answer.author}
+                              </p>
+                            </div>
+                            <p className="text-gray-700">{answer.content}</p>
                           </div>
-                          <p className="text-gray-700">{answer.content}</p>
+                          <button
+                            onClick={() => handleUpvoteAnswer(answer.id)}
+                            className="flex flex-col items-center gap-1"
+                          >
+                            {isUpvoteLoading[answer.id] ? (
+                              <div className="animate-spin h-4 w-4 border-t-2 border-[#0F9AF4] rounded-full"></div>
+                            ) : (
+                              <>
+                                <span className="text-xl">▲</span>
+                                <span className="font-medium">
+                                  {Number(answer.upvotes)}
+                                </span>
+                              </>
+                            )}
+                          </button>
                         </div>
-                        <button className="flex flex-col items-center gap-1 text-gray-500 hover:text-[#0F9AF4] transition-colors">
-                          <span className="text-xl">▲</span>
-                          <span className="font-medium">{answer.upvotes}</span>
-                        </button>
                       </div>
-                    </div>
-                  ))}
-              </div>
+                    ))}
+                </div>
 
-              {/* Answer Input */}
-              <div className="mt-6 pl-6">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Cevabınızı yazın..."
-                    className="w-full p-4 pr-24 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-[#0F9AF4] focus:ring-2 focus:ring-[#0F9AF4]/20 transition-all"
-                  />
-                  <button className="absolute right-2 top-1/2 -translate-y-1/2 bg-[#0F9AF4] text-white px-4 py-2 rounded-lg hover:bg-[#0F9AF4]/90 transition-all text-sm font-medium">
-                    Cevapla
-                  </button>
+                <div className="mt-6 pl-6">
+                  <div className="relative">
+                    <input
+                      value={newAnswerContents[question.id] || ""}
+                      onChange={(e) =>
+                        setNewAnswerContents((prev) => ({
+                          ...prev,
+                          [question.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Cevabınızı yazın..."
+                      className="w-full p-4 pr-24 bg-gray-50 rounded-xl"
+                    />
+                    <button
+                      onClick={() => createAnswer(question.id)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 bg-[#0F9AF4] text-white px-4 py-2 rounded-lg"
+                    >
+                      {isSubmitAnswerLoading[question.id] ? (
+                        <div className="animate-spin h-4 w-4 border-t-2 border-white rounded-full"></div>
+                      ) : (
+                        "Cevapla"
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </main>
     </div>
   );
